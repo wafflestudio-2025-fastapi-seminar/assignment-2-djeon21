@@ -24,7 +24,8 @@ JWT_SECRET = os.getenv("JWT_SECRET", "CHANGE_ME_DEV_ONLY")
 @user_router.post("/", status_code=status.HTTP_201_CREATED, response_model=UserResponse)
 def create_user(request: CreateUserRequest) -> UserResponse:
     if any(u.get("email") == request.email for u in user_db):
-        raise HTTPException(status_code=409, detail="EMAIL ALREADY EXISTS")
+        from src.common import CustomException
+        raise CustomException(409, "ERR_005", "EMAIL ALREADY EXISTS")
     
     hashed = PasswordHasher().hash(request.password)
     new_id = (user_db[-1]["user_id"] + 1) if user_db else 1
@@ -98,27 +99,26 @@ def get_user_info(
             
     # Token-based authentication
     if authorization:
-        parts = authorization.split()
+        parts = authorization.split(None, 1)
         if len(parts) != 2 or parts[0].lower() != "bearer":
+            from src.users.errors import BadAuthorizationHeaderException
             raise BadAuthorizationHeaderException()
 
         token = parts[1]
         if token in blocked_token_db:
+            from src.users.errors import InvalidTokenException
             raise InvalidTokenException()
 
         try:
             payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGO])
         except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            from src.users.errors import InvalidTokenException
             raise InvalidTokenException()
 
-        sub = payload.get("sub")
-        try:
-            user_id = int(sub)
-        except Exception:
-            raise InvalidTokenException()
-
-        user = next((u for u in user_db if u.get("user_id") == user_id), None)
+        uid = int(payload.get("sub"))
+        user = next((u for u in user_db if u["user_id"] == uid), None)
         if not user:
+            from src.users.errors import InvalidTokenException
             raise InvalidTokenException()
 
         return UserResponse(

@@ -1,1 +1,1 @@
-server_ip = "127.0.0.1" # 실제 배포된 EC2 서버의 주소로 변경해주세요!
+server_ip = "YOUR.EC2.PUBLIC.IP"
