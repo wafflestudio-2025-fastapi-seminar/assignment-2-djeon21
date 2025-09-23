@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from fastapi import Depends, Cookie, status, Header, Response, status, Body
+from fastapi import Cookie, status, Header, Response, status, Body
 from datetime import datetime, timezone, timedelta
 import os, jwt, secrets
 from argon2 import PasswordHasher
@@ -12,8 +12,8 @@ from src.auth.schemas import TokenLoginRequest, TokenPairResponse, SessionLoginR
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
-SHORT_SESSION_LIFESPAN = 15
-LONG_SESSION_LIFESPAN = 24 * 60
+SHORT_SESSION_LIFESPAN: int = 15
+LONG_SESSION_LIFESPAN: int = 24 * 60
 
 ALGO  ="HS256"
 JWT_SECRET = os.getenv("JWT_SECRET", "CHANGE_ME_DEV_ONLY")
@@ -46,86 +46,68 @@ def issue_token(body: TokenLoginRequest) -> TokenPairResponse:
     return TokenPairResponse(access_token=access_token, refresh_token=refresh_token)
 
 
-@auth_router.post("/token/refresh", response_model=TokenPairResponse)
+@auth_router.post("/token/refresh", status_code=status.HTTP_200_OK, response_model=TokenPairResponse)
 def refresh_token(
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
-    body: RefreshRequest | None = Body(default=None),
 ) -> TokenPairResponse:
-    token = None
-    if authorization:
-        parts = authorization.split(None, 1)
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
-    if token is None and body and body.refresh_token:
-        token = body.refresh_token
-    if token is None:
-        from src.users.errors import UnauthenticatedException
-        raise UnauthenticatedException()
-
-    if token in blocked_token_db:
-        from src.users.errors import InvalidTokenException
-        raise InvalidTokenException()
-
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGO])
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        from src.users.errors import InvalidTokenException
-        raise InvalidTokenException()
-
-    sub = payload.get("sub")
-    try:
-        uid = int(sub)
-    except Exception:
-        from src.users.errors import InvalidTokenException
-        raise InvalidTokenException()
-
-    if not any(u.get("user_id") == uid for u in user_db):
-        from src.users.errors import InvalidTokenException
-        raise InvalidTokenException()
-
-    blocked_token_db.add(token)
-    new_access  = _make_jwt(str(uid), SHORT_SESSION_LIFESPAN) 
-    new_refresh = _make_jwt(str(uid), LONG_SESSION_LIFESPAN)   
-    return TokenPairResponse(access_token=new_access, refresh_token=new_refresh)
-
-@auth_router.delete("/token", status_code=status.HTTP_204_NO_CONTENT)
-def revoke_refresh_token(
-    authorization: str | None = Header(default=None, alias="Authorization"),
-):
     if authorization is None:
         raise UnauthenticatedException() 
 
     parts = authorization.split(None, 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise BadAuthorizationHeaderException() 
+        raise BadAuthorizationHeaderException()  
+
     refresh = parts[1]
 
-    now_unix = datetime.now(timezone.utc).timestamp()
-
-    if isinstance(blocked_token_db, dict):
-        exp_block = blocked_token_db.get(refresh)
-        if exp_block is not None and now_unix < float(exp_block):
-            raise InvalidTokenException() 
-    else:
-        if refresh in blocked_token_db:
-            raise InvalidTokenException()  
+    if refresh in blocked_token_db:
+        raise InvalidTokenException() 
 
     try:
-        payload = jwt.decode(refresh, JWT_SECRET, algorithms=[ALGO]) 
+        payload = jwt.decode(refresh, JWT_SECRET, algorithms=[ALGO])
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        raise InvalidTokenException() 
+
+    sub = payload.get("sub")
+    try:
+        uid = int(sub)
+    except Exception:
+        raise InvalidTokenException()
+
+    if not any(u.get("user_id") == uid for u in user_db):
+        raise InvalidTokenException()
+
+    exp_unix = float(payload["exp"])
+    blocked_token_db[refresh] = exp_unix
+
+    new_access  = _make_jwt(str(uid), SHORT_SESSION_LIFESPAN)
+    new_refresh = _make_jwt(str(uid), LONG_SESSION_LIFESPAN)
+    return TokenPairResponse(access_token=new_access, refresh_token=new_refresh)
+
+@auth_router.delete("/token", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_refresh_token(
+    authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+):
+    if authorization is None:
+        raise UnauthenticatedException()  
+
+    parts = authorization.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise BadAuthorizationHeaderException()  
+
+    refresh = parts[1]
+
+    now_unix = _now_utc().timestamp()
+    exp_block = blocked_token_db.get(refresh)
+    if exp_block is not None and now_unix < float(exp_block):
+        raise InvalidTokenException() 
+
+    try:
+        payload = jwt.decode(refresh, JWT_SECRET, algorithms=[ALGO])
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         raise InvalidTokenException()  
 
-    exp_unix = payload.get("exp")
-    if exp_unix is None:
-        raise InvalidTokenException()  
-
-    if isinstance(blocked_token_db, dict):
-        blocked_token_db[refresh] = float(exp_unix)
-        for tok, ts in list(blocked_token_db.items()):
-            if now_unix >= float(ts):
-                blocked_token_db.pop(tok, None)
-    else:
-        blocked_token_db.add(refresh)
+    exp_unix = float(payload.get("exp"))
+    blocked_token_db[refresh] = exp_unix
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

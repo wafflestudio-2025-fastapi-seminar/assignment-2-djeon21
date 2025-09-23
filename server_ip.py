@@ -1,1 +1,1 @@
-server_ip = "YOUR.EC2.PUBLIC.IP"
+server_ip = "54.180.120.180"
