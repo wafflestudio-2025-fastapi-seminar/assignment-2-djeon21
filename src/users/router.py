@@ -13,7 +13,7 @@ from fastapi import (
 )
 
 from src.users.schemas import CreateUserRequest, UserResponse
-from common.database import blocked_token_db, session_db, user_db
+from src.common.database import blocked_token_db, session_db, user_db
 from src.users.errors import InvalidSessionException, BadAuthorizationHeaderException, InvalidTokenException, UnauthenticatedException
 
 user_router = APIRouter(prefix="/users", tags=["users"])
@@ -23,15 +23,12 @@ JWT_SECRET = os.getenv("JWT_SECRET", "CHANGE_ME_DEV_ONLY")
 
 @user_router.post("/", status_code=status.HTTP_201_CREATED, response_model=UserResponse)
 def create_user(request: CreateUserRequest) -> UserResponse:
-    # check to see if the email if unique
     if any(u.get("email") == request.email for u in user_db):
         raise HTTPException(status_code=409, detail="EMAIL ALREADY EXISTS")
     
-    # hash password
     hashed = PasswordHasher().hash(request.password)
     new_id = (user_db[-1]["user_id"] + 1) if user_db else 1
     
-    # append to user_db
     new_info = {
         "user_id": new_id,
         "email": request.email,
@@ -43,7 +40,6 @@ def create_user(request: CreateUserRequest) -> UserResponse:
     }
     user_db.append(new_info)
     
-    # response
     return UserResponse(
         user_id=new_info["user_id"],
         email=new_info["email"],
@@ -56,7 +52,7 @@ def create_user(request: CreateUserRequest) -> UserResponse:
 @user_router.get("/me", response_model=UserResponse)
 def get_user_info(
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
-    sid: Annotated[str | None, Cookie(default=None, alias="sid")] = None,
+    sid: Annotated[str | None, Cookie(alias="sid")] = None,
 ) -> UserResponse:
     now = datetime.now(timezone.utc)
     

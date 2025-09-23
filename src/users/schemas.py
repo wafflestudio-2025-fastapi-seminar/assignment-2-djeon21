@@ -3,7 +3,7 @@ import re
 from pydantic import BaseModel, field_validator, EmailStr
 from fastapi import HTTPException
 
-from users.errors import InvalidPasswordException, InvalidPhoneNumberException, BioTooLongException
+from src.users.errors import InvalidPasswordException, InvalidPhoneNumberException, BioTooLongException
 
 class CreateUserRequest(BaseModel):
     name: str

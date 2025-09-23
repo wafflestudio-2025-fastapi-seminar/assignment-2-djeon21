@@ -6,9 +6,9 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHash
 from typing import Annotated
 
-from common.database import blocked_token_db, session_db, user_db
+from src.common.database import blocked_token_db, session_db, user_db
 from src.users.errors import InvalidAccountException, UnauthenticatedException, BadAuthorizationHeaderException, InvalidTokenException
-from .schemas import TokenLoginRequest, TokenPairResponse, SessionLoginRequest
+from src.auth.schemas import TokenLoginRequest, TokenPairResponse, SessionLoginRequest
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -145,7 +145,7 @@ def session_login(body: SessionLoginRequest, response: Response):
 @auth_router.delete("/session", status_code=status.HTTP_204_NO_CONTENT)
 def session_logout(
     response: Response,
-    sid: Annotated[str | None, Cookie(default=None, alias="sid")] = None,
+    sid: Annotated[str | None, Cookie(alias="sid")] = None,
 ):
     response.delete_cookie(key="sid", path="/", samesite="lax", secure=False)
 
