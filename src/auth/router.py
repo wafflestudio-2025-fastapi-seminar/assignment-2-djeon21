@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from fastapi import Depends, Cookie, status, Header, Response, status
+from fastapi import Cookie, status, Header, Response, status, Body
 from datetime import datetime, timezone, timedelta
 import os, jwt, secrets
 from argon2 import PasswordHasher
@@ -8,12 +8,12 @@ from typing import Annotated
 
 from src.common.database import blocked_token_db, session_db, user_db
 from src.users.errors import InvalidAccountException, UnauthenticatedException, BadAuthorizationHeaderException, InvalidTokenException
-from src.auth.schemas import TokenLoginRequest, TokenPairResponse, SessionLoginRequest
+from src.auth.schemas import TokenLoginRequest, TokenPairResponse, SessionLoginRequest, RefreshRequest
 
 auth_router = APIRouter(prefix="/auth", tags=["auth"])
 
-SHORT_SESSION_LIFESPAN = 15
-LONG_SESSION_LIFESPAN = 24 * 60
+SHORT_SESSION_LIFESPAN: int = 15
+LONG_SESSION_LIFESPAN: int = 24 * 60
 
 ALGO  ="HS256"
 JWT_SECRET = os.getenv("JWT_SECRET", "CHANGE_ME_DEV_ONLY")
@@ -26,8 +26,9 @@ def _find_user_by_email(email: str) -> dict | None:
 
 def _make_jwt(sub: str, minutes: int) -> str:
     now = _now_utc()
-    payload = {"sub": sub, "iat": now, "exp": now + timedelta(minutes-minutes)}
+    payload = {"sub": sub, "iat": now, "exp": now + timedelta(minutes=minutes)}
     return jwt.encode(payload, JWT_SECRET, algorithm=ALGO)
+
 
 
 @auth_router.post("/token", status_code=status.HTTP_200_OK, response_model=TokenPairResponse)
@@ -47,23 +48,25 @@ def issue_token(body: TokenLoginRequest) -> TokenPairResponse:
 
 
 @auth_router.post("/token/refresh", status_code=status.HTTP_200_OK, response_model=TokenPairResponse)
-def refresh_token(authorization: str | None = Header(default=None, alias="Authorization")) -> TokenPairResponse:
-    if not authorization:
-        raise UnauthenticatedException()
+def refresh_token(
+    authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+) -> TokenPairResponse:
+    if authorization is None:
+        raise UnauthenticatedException() 
 
-    parts = authorization.split()
+    parts = authorization.split(None, 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise BadAuthorizationHeaderException()
+        raise BadAuthorizationHeaderException()  
 
-    old_refresh = parts[1]
+    refresh = parts[1]
 
-    if old_refresh in blocked_token_db:
-        raise InvalidTokenException()
+    if refresh in blocked_token_db:
+        raise InvalidTokenException() 
 
     try:
-        payload = jwt.decode(old_refresh, JWT_SECRET, algorithms=[ALGO]) 
+        payload = jwt.decode(refresh, JWT_SECRET, algorithms=[ALGO])
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        raise InvalidTokenException()
+        raise InvalidTokenException() 
 
     sub = payload.get("sub")
     try:
@@ -74,7 +77,8 @@ def refresh_token(authorization: str | None = Header(default=None, alias="Author
     if not any(u.get("user_id") == uid for u in user_db):
         raise InvalidTokenException()
 
-    blocked_token_db.add(old_refresh)
+    exp_unix = float(payload["exp"])
+    blocked_token_db[refresh] = exp_unix
 
     new_access  = _make_jwt(str(uid), SHORT_SESSION_LIFESPAN)
     new_refresh = _make_jwt(str(uid), LONG_SESSION_LIFESPAN)
@@ -84,34 +88,27 @@ def refresh_token(authorization: str | None = Header(default=None, alias="Author
 def revoke_refresh_token(
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
 ):
-    if not authorization:
-        raise UnauthenticatedException() 
+    if authorization is None:
+        raise UnauthenticatedException()  
 
-    parts = authorization.split()
+    parts = authorization.split(None, 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise BadAuthorizationHeaderException() 
+        raise BadAuthorizationHeaderException()  
 
     refresh = parts[1]
 
     now_unix = _now_utc().timestamp()
-    if isinstance(blocked_token_db, dict):
-        exp_block = blocked_token_db.get(refresh)
-        if exp_block is not None and now_unix < float(exp_block):
-            raise InvalidTokenException()  
-    else: 
-        if refresh in blocked_token_db:
-            raise InvalidTokenException()
+    exp_block = blocked_token_db.get(refresh)
+    if exp_block is not None and now_unix < float(exp_block):
+        raise InvalidTokenException() 
 
     try:
         payload = jwt.decode(refresh, JWT_SECRET, algorithms=[ALGO])
     except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        raise InvalidTokenException()
+        raise InvalidTokenException()  
 
-    exp_unix = float(payload.get("exp", now_unix))
-    if isinstance(blocked_token_db, dict):
-        blocked_token_db[refresh] = exp_unix
-    else:
-        blocked_token_db.add(refresh)
+    exp_unix = float(payload.get("exp"))
+    blocked_token_db[refresh] = exp_unix
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

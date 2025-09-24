@@ -69,5 +69,5 @@ class InvalidAccountException(CustomException):
         super().__init__(
             status_code=401, 
             error_code="ERR_010", 
-            error_message="Invalid Account"
+            error_message="INVALID ACCOUNT"
         )
