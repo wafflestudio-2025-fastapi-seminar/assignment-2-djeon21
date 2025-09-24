@@ -26,8 +26,9 @@ def _find_user_by_email(email: str) -> dict | None:
 
 def _make_jwt(sub: str, minutes: int) -> str:
     now = _now_utc()
-    payload = {"sub": sub, "iat": now, "exp": now + timedelta(minutes-minutes)}
+    payload = {"sub": sub, "iat": now, "exp": now + timedelta(minutes=minutes)}
     return jwt.encode(payload, JWT_SECRET, algorithm=ALGO)
+
 
 
 @auth_router.post("/token", status_code=status.HTTP_200_OK, response_model=TokenPairResponse)

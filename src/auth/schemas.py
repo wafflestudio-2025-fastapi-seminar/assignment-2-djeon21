@@ -14,6 +14,3 @@ class RefreshRequest(BaseModel):
 class SessionLoginRequest(BaseModel):
     email: EmailStr
     password: str
-    
-class RefreshRequest(BaseModel):
-    refresh_token: str
